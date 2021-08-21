@@ -20,9 +20,13 @@ package org.apache.skywalking.oap.server.storage.plugin.elasticsearch.query;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import org.apache.skywalking.library.elasticsearch.response.Document;
+import org.apache.skywalking.library.elasticsearch.response.Documents;
 import org.apache.skywalking.oap.server.core.analysis.metrics.DataTable;
 import org.apache.skywalking.oap.server.core.analysis.metrics.HistogramMetrics;
 import org.apache.skywalking.oap.server.core.analysis.metrics.Metrics;
@@ -43,7 +47,6 @@ import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.index.query.RangeQueryBuilder;
-import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
@@ -111,12 +114,15 @@ public class MetricsQueryEsDAO extends EsDAO implements IMetricsQueryDAO {
             }
             ids.add(id);
         });
-
-        SearchResponse response = getClient()
-            .ids(tableName, ids.toArray(new String[0]));
-        Map<String, Map<String, Object>> idMap = toMap(response);
-
         MetricsValues metricsValues = new MetricsValues();
+
+        Optional<Documents> response = getClient().ids(tableName, ids);
+        if (!response.isPresent()) {
+            return metricsValues;
+        }
+
+        Map<String, Map<String, Object>> idMap = toMap(response.get());
+
         // Label is null, because in readMetricsValues, no label parameter.
         IntValues intValues = metricsValues.getValues();
         for (String id : ids) {
@@ -156,11 +162,13 @@ public class MetricsQueryEsDAO extends EsDAO implements IMetricsQueryDAO {
             ids.add(id);
         });
 
-        SearchResponse response = getClient().ids(tableName, ids.toArray(new String[0]));
+        Optional<Documents> response = getClient().ids(tableName, ids);
+        if (!response.isPresent()) {
+            return Collections.emptyList();
+        }
         Map<String, DataTable> idMap = new HashMap<>();
-        SearchHit[] hits = response.getHits().getHits();
-        for (SearchHit hit : hits) {
-            idMap.put(hit.getId(), new DataTable((String) hit.getSourceAsMap().getOrDefault(valueColumnName, "")));
+        for (final Document document : response.get()) {
+            idMap.put(document.getId(), new DataTable((String) document.getSource().getOrDefault(valueColumnName, "")));
         }
         return Util.composeLabelValue(condition, labels, ids, idMap);
     }
@@ -181,10 +189,13 @@ public class MetricsQueryEsDAO extends EsDAO implements IMetricsQueryDAO {
             ids.add(id);
         });
 
-        SearchResponse response = getClient().ids(tableName, ids.toArray(new String[0]));
-        Map<String, Map<String, Object>> idMap = toMap(response);
-
         HeatMap heatMap = new HeatMap();
+
+        Optional<Documents> response = getClient().ids(tableName, ids);
+        if (!response.isPresent()) {
+            return heatMap;
+        }
+        Map<String, Map<String, Object>> idMap = toMap(response.get());
 
         final int defaultValue = ValueColumnMetadata.INSTANCE.getDefaultValue(condition.getName());
         for (String id : ids) {
@@ -254,11 +265,10 @@ public class MetricsQueryEsDAO extends EsDAO implements IMetricsQueryDAO {
         sourceBuilder.size(0);
     }
 
-    private Map<String, Map<String, Object>> toMap(SearchResponse response) {
+    private Map<String, Map<String, Object>> toMap(Documents documents) {
         Map<String, Map<String, Object>> result = new HashMap<>();
-        SearchHit[] hits = response.getHits().getHits();
-        for (SearchHit hit : hits) {
-            result.put(hit.getId(), hit.getSourceAsMap());
+        for (final Document document : documents) {
+            result.put(document.getId(), document.getSource());
         }
         return result;
     }

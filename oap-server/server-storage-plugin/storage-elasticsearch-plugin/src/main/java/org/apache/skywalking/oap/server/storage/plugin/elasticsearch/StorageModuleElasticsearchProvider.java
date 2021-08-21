@@ -229,6 +229,7 @@ public class StorageModuleElasticsearchProvider extends ModuleProvider {
         return new String[] {CoreModule.NAME};
     }
 
+    // TODO
     public static List<IndexNameConverter> indexNameConverters(String namespace) {
         List<IndexNameConverter> converters = new ArrayList<>();
         converters.add(new NamespaceConverter(namespace));

@@ -19,6 +19,12 @@ package org.apache.skywalking.oap.server.storage.plugin.elasticsearch.query;
 
 import java.io.IOException;
 import org.apache.skywalking.apm.util.StringUtil;
+import org.apache.skywalking.library.elasticsearch.requests.search.BoolQueryBuilder;
+import org.apache.skywalking.library.elasticsearch.requests.search.Query;
+import org.apache.skywalking.library.elasticsearch.requests.search.Search;
+import org.apache.skywalking.library.elasticsearch.requests.search.SearchBuilder;
+import org.apache.skywalking.library.elasticsearch.response.search.SearchHit;
+import org.apache.skywalking.library.elasticsearch.response.search.SearchResponse;
 import org.apache.skywalking.oap.server.core.browser.manual.errorlog.BrowserErrorLogRecord;
 import org.apache.skywalking.oap.server.core.browser.source.BrowserErrorCategory;
 import org.apache.skywalking.oap.server.core.query.type.BrowserErrorLog;
@@ -27,11 +33,6 @@ import org.apache.skywalking.oap.server.core.storage.query.IBrowserLogQueryDAO;
 import org.apache.skywalking.oap.server.library.client.elasticsearch.ElasticSearchClient;
 import org.apache.skywalking.oap.server.storage.plugin.elasticsearch.base.EsDAO;
 import org.apache.skywalking.oap.server.storage.plugin.elasticsearch.base.IndexController;
-import org.elasticsearch.action.search.SearchResponse;
-import org.elasticsearch.index.query.BoolQueryBuilder;
-import org.elasticsearch.index.query.QueryBuilders;
-import org.elasticsearch.search.SearchHit;
-import org.elasticsearch.search.builder.SearchSourceBuilder;
 
 import static java.util.Objects.nonNull;
 
@@ -49,42 +50,37 @@ public class BrowserLogQueryEsDAO extends EsDAO implements IBrowserLogQueryDAO {
                                                   final long endSecondTB,
                                                   final int limit,
                                                   final int from) throws IOException {
-        SearchSourceBuilder sourceBuilder = SearchSourceBuilder.searchSource();
+        final String index = IndexController.LogicIndicesRegister.getPhysicalTableName(
+            BrowserErrorLogRecord.INDEX_NAME);
 
-        BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
-        sourceBuilder.query(boolQueryBuilder);
-
+        final BoolQueryBuilder query = Query.bool();
         if (startSecondTB != 0 && endSecondTB != 0) {
-            boolQueryBuilder.must().add(
-                QueryBuilders.rangeQuery(BrowserErrorLogRecord.TIME_BUCKET).gte(startSecondTB).lte(endSecondTB));
+            query.must(Query.range(BrowserErrorLogRecord.TIME_BUCKET)
+                            .gte(startSecondTB)
+                            .lte(endSecondTB));
         }
         if (StringUtil.isNotEmpty(serviceId)) {
-            boolQueryBuilder.must().add(QueryBuilders.termQuery(BrowserErrorLogRecord.SERVICE_ID, serviceId));
+            query.must(Query.term(BrowserErrorLogRecord.SERVICE_ID, serviceId));
         }
         if (StringUtil.isNotEmpty(serviceVersionId)) {
-            boolQueryBuilder.must()
-                            .add(QueryBuilders.termQuery(BrowserErrorLogRecord.SERVICE_VERSION_ID, serviceVersionId));
+            query.must(Query.term(BrowserErrorLogRecord.SERVICE_VERSION_ID, serviceVersionId));
         }
         if (StringUtil.isNotEmpty(pagePathId)) {
-            boolQueryBuilder.must().add(QueryBuilders.termQuery(BrowserErrorLogRecord.PAGE_PATH_ID, pagePathId));
+            query.must(Query.term(BrowserErrorLogRecord.PAGE_PATH_ID, pagePathId));
         }
         if (nonNull(category)) {
-            boolQueryBuilder.must()
-                            .add(QueryBuilders.termQuery(BrowserErrorLogRecord.ERROR_CATEGORY, category.getValue()));
+            query.must(Query.term(BrowserErrorLogRecord.ERROR_CATEGORY, category.getValue()));
         }
-        sourceBuilder.size(limit);
-        sourceBuilder.from(from);
-        SearchResponse response = getClient()
-            .search(
-                IndexController.LogicIndicesRegister.getPhysicalTableName(BrowserErrorLogRecord.INDEX_NAME),
-                sourceBuilder
-            );
 
-        BrowserErrorLogs logs = new BrowserErrorLogs();
-        logs.setTotal((int) response.getHits().totalHits);
+        final SearchBuilder search = Search.builder().query(query).size(limit).from(from);
+        final SearchResponse response = getClient().search(index, search.build());
+
+        final BrowserErrorLogs logs = new BrowserErrorLogs();
+        logs.setTotal(response.getHits().getTotal());
 
         for (SearchHit searchHit : response.getHits().getHits()) {
-            String dataBinaryBase64 = (String) searchHit.getSourceAsMap().get(BrowserErrorLogRecord.DATA_BINARY);
+            String dataBinaryBase64 =
+                (String) searchHit.getSource().get(BrowserErrorLogRecord.DATA_BINARY);
             if (nonNull(dataBinaryBase64)) {
                 BrowserErrorLog log = parserDataBinary(dataBinaryBase64);
                 logs.getLogs().add(log);

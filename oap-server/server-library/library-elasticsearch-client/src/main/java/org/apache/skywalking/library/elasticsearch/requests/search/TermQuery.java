@@ -15,20 +15,15 @@
  * limitations under the License.
  */
 
-package org.apache.skywalking.oap.server.library.client.elasticsearch;
+package org.apache.skywalking.library.elasticsearch.requests.search;
 
-import org.elasticsearch.action.update.UpdateRequest;
-import org.elasticsearch.common.xcontent.XContentBuilder;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 
-public class ElasticSearchUpdateRequest extends UpdateRequest implements org.apache.skywalking.oap.server.library.client.request.UpdateRequest {
-
-    public ElasticSearchUpdateRequest(String index, String type, String id) {
-        super(index, type, id);
-    }
-
-    @Override
-    public ElasticSearchUpdateRequest doc(XContentBuilder source) {
-        super.doc(source);
-        return this;
-    }
+@Getter
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
+public final class TermQuery extends Query {
+    private final String name;
+    private final Object value;
 }

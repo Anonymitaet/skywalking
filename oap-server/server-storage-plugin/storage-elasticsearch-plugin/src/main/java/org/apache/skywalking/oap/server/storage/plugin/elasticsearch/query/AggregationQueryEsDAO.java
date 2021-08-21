@@ -21,6 +21,13 @@ package org.apache.skywalking.oap.server.storage.plugin.elasticsearch.query;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import org.apache.skywalking.library.elasticsearch.requests.search.BoolQueryBuilder;
+import org.apache.skywalking.library.elasticsearch.requests.search.Query;
+import org.apache.skywalking.library.elasticsearch.requests.search.RangeQueryBuilder;
+import org.apache.skywalking.library.elasticsearch.requests.search.Search;
+import org.apache.skywalking.library.elasticsearch.requests.search.SearchBuilder;
+import org.apache.skywalking.library.elasticsearch.requests.search.aggregation.Aggregation;
+import org.apache.skywalking.library.elasticsearch.response.search.SearchResponse;
 import org.apache.skywalking.oap.server.core.analysis.metrics.Metrics;
 import org.apache.skywalking.oap.server.core.query.enumeration.Order;
 import org.apache.skywalking.oap.server.core.query.input.Duration;
@@ -32,10 +39,7 @@ import org.apache.skywalking.oap.server.library.client.elasticsearch.ElasticSear
 import org.apache.skywalking.oap.server.library.util.CollectionUtils;
 import org.apache.skywalking.oap.server.storage.plugin.elasticsearch.base.EsDAO;
 import org.apache.skywalking.oap.server.storage.plugin.elasticsearch.base.IndexController;
-import org.elasticsearch.action.search.SearchResponse;
-import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
-import org.elasticsearch.index.query.RangeQueryBuilder;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import org.elasticsearch.search.aggregations.BucketOrder;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
@@ -52,71 +56,79 @@ public class AggregationQueryEsDAO extends EsDAO implements IAggregationQueryDAO
     public List<SelectedRecord> sortMetrics(final TopNCondition condition,
                                             final String valueColumnName,
                                             final Duration duration,
-                                            final List<KeyValue> additionalConditions) throws IOException {
+                                            final List<KeyValue> additionalConditions)
+        throws IOException {
         SearchSourceBuilder sourceBuilder = SearchSourceBuilder.searchSource();
-        final RangeQueryBuilder queryBuilder = QueryBuilders.rangeQuery(Metrics.TIME_BUCKET)
-                                                            .lte(duration.getEndTimeBucket())
-                                                            .gte(duration.getStartTimeBucket());
 
-        boolean asc = false;
-        if (condition.getOrder().equals(Order.ASC)) {
-            asc = true;
-        }
-        String tableName = IndexController.LogicIndicesRegister.getPhysicalTableName(condition.getName());
+        final RangeQueryBuilder basicQuery = Query.range(Metrics.TIME_BUCKET)
+                                                  .lte(duration.getEndTimeBucket())
+                                                  .gte(duration.getStartTimeBucket());
+        final SearchBuilder search = Search.builder();
+
+        final boolean asc = condition.getOrder().equals(Order.ASC);
+        final String tableName =
+            IndexController.LogicIndicesRegister.getPhysicalTableName(condition.getName());
 
         if (CollectionUtils.isEmpty(additionalConditions)
             && IndexController.LogicIndicesRegister.isMetricTable(condition.getName())) {
-            BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
-            boolQuery.must()
-                     .add(QueryBuilders.termQuery(
+            final org.apache.skywalking.library.elasticsearch.requests.search.BoolQueryBuilder
+                boolQuery = Query.bool();
+            boolQuery.must(basicQuery)
+                     .must(Query.term(
                          IndexController.LogicIndicesRegister.METRIC_TABLE_NAME,
                          condition.getName()
                      ));
-            boolQuery.must().add(queryBuilder);
-            sourceBuilder.query(boolQuery);
+            search.query(boolQuery);
         } else if (CollectionUtils.isEmpty(additionalConditions)) {
-            sourceBuilder.query(queryBuilder);
+            search.query(basicQuery);
         } else if (CollectionUtils.isNotEmpty(additionalConditions)
             && IndexController.LogicIndicesRegister.isMetricTable(condition.getName())) {
-            BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
-            boolQuery.must()
-                     .add(QueryBuilders.termQuery(
-                         IndexController.LogicIndicesRegister.METRIC_TABLE_NAME,
-                         condition.getName()
-                     ));
+            final org.apache.skywalking.library.elasticsearch.requests.search.BoolQueryBuilder
+                boolQuery = Query.bool();
+            boolQuery.must(Query.term(
+                IndexController.LogicIndicesRegister.METRIC_TABLE_NAME,
+                condition.getName()
+            ));
             additionalConditions.forEach(additionalCondition -> boolQuery
-                .must()
-                .add(QueryBuilders.termsQuery(additionalCondition.getKey(), additionalCondition.getValue())));
-            boolQuery.must().add(queryBuilder);
-            sourceBuilder.query(boolQuery);
+                .must(Query.term(
+                    additionalCondition.getKey(),
+                    additionalCondition.getValue()
+                )));
+            boolQuery.must(basicQuery);
+            search.query(boolQuery);
         } else {
-            BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+            final BoolQueryBuilder boolQuery = Query.bool();
             additionalConditions.forEach(additionalCondition -> boolQuery
-                .must()
-                .add(QueryBuilders.termsQuery(additionalCondition.getKey(), additionalCondition.getValue())));
-            boolQuery.must().add(queryBuilder);
-            sourceBuilder.query(boolQuery);
+                .must(Query.term(
+                    additionalCondition.getKey(),
+                    additionalCondition.getValue()
+                )));
+            boolQuery.must(basicQuery);
+            search.query(boolQuery);
         }
 
-        sourceBuilder.aggregation(
-            AggregationBuilders.terms(Metrics.ENTITY_ID)
-                               .field(Metrics.ENTITY_ID)
-                               .order(BucketOrder.aggregation(valueColumnName, asc))
-                               .size(condition.getTopN())
-                               .subAggregation(AggregationBuilders.avg(valueColumnName).field(valueColumnName))
-        );
+        search.aggregation(
+            Aggregation.terms(Metrics.ENTITY_ID)
+                       .field(Metrics.ENTITY_ID)
+                       .order(
+                           org.apache.skywalking.library.elasticsearch.requests.search.aggregation.BucketOrder.aggregation(
+                               valueColumnName, asc))
+                       .size(condition.getTopN())
+                       .subAggregation(Aggregation.avg(valueColumnName).field(valueColumnName))
+                       .build());
 
-        SearchResponse response = getClient().search(tableName, sourceBuilder);
+        SearchResponse response = getClient().search(tableName, search.build());
 
         List<SelectedRecord> topNList = new ArrayList<>();
-        Terms idTerms = response.getAggregations().get(Metrics.ENTITY_ID);
-        for (Terms.Bucket termsBucket : idTerms.getBuckets()) {
-            SelectedRecord record = new SelectedRecord();
-            record.setId(termsBucket.getKeyAsString());
-            Avg value = termsBucket.getAggregations().get(valueColumnName);
-            record.setValue(String.valueOf((long) value.getValue()));
-            topNList.add(record);
-        }
+        // TODO
+        // Terms idTerms = response.getAggregations().get(Metrics.ENTITY_ID);
+        // for (Terms.Bucket termsBucket : idTerms.getBuckets()) {
+        //     SelectedRecord record = new SelectedRecord();
+        //     record.setId(termsBucket.getKeyAsString());
+        //     Avg value = termsBucket.getAggregations().get(valueColumnName);
+        //     record.setValue(String.valueOf((long) value.getValue()));
+        //     topNList.add(record);
+        // }
 
         return topNList;
     }

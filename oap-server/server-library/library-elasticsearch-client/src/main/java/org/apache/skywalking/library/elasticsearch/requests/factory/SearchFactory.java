@@ -15,21 +15,14 @@
  * limitations under the License.
  */
 
-package org.apache.skywalking.oap.server.library.client.elasticsearch;
+package org.apache.skywalking.library.elasticsearch.requests.factory;
 
-import org.apache.skywalking.oap.server.library.client.request.InsertRequest;
-import org.elasticsearch.action.index.IndexRequest;
-import org.elasticsearch.common.xcontent.XContentBuilder;
+import com.linecorp.armeria.common.HttpRequest;
+import org.apache.skywalking.library.elasticsearch.requests.search.Search;
 
-public class ElasticSearchInsertRequest extends IndexRequest implements InsertRequest {
-
-    public ElasticSearchInsertRequest(String index, String type, String id) {
-        super(index, type, id);
-    }
-
-    @Override
-    public ElasticSearchInsertRequest source(XContentBuilder sourceBuilder) {
-        super.source(sourceBuilder);
-        return this;
-    }
+public interface SearchFactory {
+    /**
+     * Returns a request to search documents.
+     */
+    HttpRequest search(Search search, String... index);
 }
